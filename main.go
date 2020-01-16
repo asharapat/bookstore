@@ -4,96 +4,97 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
-	"time"
+
+	"bookstore/helper"
+	"bookstore/models"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
-
-var client *mongo.Client
-
-type Book struct {
-	ID     primitive.ObjectID `json:"_id, omitempty" bson:"_id,omitempty"`
-	Name   string             `json:"name,omitempty" bson:"name,omitempty"`
-	Author string             `json:"author,omitempty" bson:"author,omitempty"`
-}
 
 func main() {
 	fmt.Println("Starting the application...")
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
-	client, _ = mongo.Connect(ctx, clientOptions)
+
 	router := mux.NewRouter()
-	router.HandleFunc("/book", CreateBookEndpoint).Methods("POST")
-	router.HandleFunc("/books", GetBooksEndpoint).Methods("GET")
-	router.HandleFunc("/book/{id}", GetBookEndpoint).Methods("GET")
-	router.HandleFunc("/book/{id}", UpdateBookEndpoint).Methods("PUT")
-	router.HandleFunc("/book/{id}", DeleteBookEndpoint).Methods("DELETE")
+	router.HandleFunc("/books", getBooks).Methods("GET")
+	router.HandleFunc("/book", createBook).Methods("POST")
+	router.HandleFunc("/book/{id}", getBook).Methods("GET")
+	router.HandleFunc("/book/{id}", updateBook).Methods("PUT")
+	router.HandleFunc("/book/{id}", deleteBook).Methods("DELETE")
 	http.ListenAndServe(":12345", router)
 }
 
-func CreateBookEndpoint(response http.ResponseWriter, request *http.Request) {
+func getBooks(response http.ResponseWriter, request *http.Request) {
+
 	response.Header().Set("content-type", "application/json")
-	var book Book
+
+	var books []models.Book
+
+	collection := helper.ConnectDB()
+
+	cur, err := collection.Find(context.TODO(), bson.M{})
+
+	if err != nil {
+		helper.GetError(err, response)
+		return
+	}
+
+	defer cur.Close(context.TODO())
+
+	for cur.Next(context.TODO()) {
+		var book models.Book
+		err := cur.Decode(&book)
+		if err != nil {
+			log.Fatal(err)
+		}
+		books = append(books, book)
+	}
+
+	json.NewEncoder(response).Encode(books)
+
+}
+
+func createBook(response http.ResponseWriter, request *http.Request) {
+
+	response.Header().Set("Content-Type", "application/json")
+
+	var book models.Book
+
 	_ = json.NewDecoder(request.Body).Decode(&book)
-	collection := client.Database("benfica").Collection("books")
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	result, _ := collection.InsertOne(ctx, book)
+	collection := helper.ConnectDB()
+	result, err := collection.InsertOne(context.TODO(), book)
+	if err != nil {
+		helper.GetError(err, response)
+		return
+	}
+
 	json.NewEncoder(response).Encode(result)
 }
 
-func GetBookEndpoint(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("content-type", "application/json")
-	params := mux.Vars(request)
+func getBook(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Content-Type", "application/json")
+	var book models.Book
+	var params = mux.Vars(request)
 	id, _ := primitive.ObjectIDFromHex(params["id"])
-	var book Book
-	collection := client.Database("benfica").Collection("books")
-	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
-	err := collection.FindOne(ctx, Book{ID: id}).Decode(&book)
+	collection := helper.ConnectDB()
+	filter := bson.M{"_id": id}
+	err := collection.FindOne(context.TODO(), filter).Decode(&book)
 	if err != nil {
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
+		helper.GetError(err, response)
 		return
 	}
 	json.NewEncoder(response).Encode(book)
 }
 
-func GetBooksEndpoint(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("content-type", "application/json")
-	var books []Book
-	collection := client.Database("benfica").Collection("books")
-	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
-	cursor, err := collection.Find(ctx, bson.M{})
-	if err != nil {
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
-		return
-	}
-	defer cursor.Close(ctx)
-	for cursor.Next(ctx) {
-		var book Book
-		cursor.Decode(&book)
-		books = append(books, book)
-	}
-
-	if err := cursor.Err(); err != nil {
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
-	}
-	json.NewEncoder(response).Encode(books)
-}
-
-func UpdateBookEndpoint(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("content-type", "application/json")
-	params := mux.Vars(request)
+func updateBook(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Content-Type", "application/json")
+	var params = mux.Vars(request)
 	id, _ := primitive.ObjectIDFromHex(params["id"])
-	var book Book
-	collection := client.Database("benfica").Collection("books")
-	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	var book models.Book
+	collection := helper.ConnectDB()
 	filter := bson.M{"_id": id}
 	_ = json.NewDecoder(request.Body).Decode(&book)
 
@@ -104,30 +105,30 @@ func UpdateBookEndpoint(response http.ResponseWriter, request *http.Request) {
 		}},
 	}
 
-	err := collection.FindOneAndUpdate(ctx, filter, update).Decode(&book)
+	fmt.Println(book)
+
+	err := collection.FindOneAndUpdate(context.TODO(), filter, update).Decode(&book)
+
+	fmt.Println(book)
 
 	if err != nil {
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
+		helper.GetError(err, response)
 		return
 	}
 
-	book.ID = id
-	json.NewEncoder(response).Encode(book)
+	json.NewEncoder(response).Encode(update)
 
 }
 
-func DeleteBookEndpoint(response http.ResponseWriter, request *http.Request) {
-	response.Header().Set("content-type", "application/json")
-	params := mux.Vars(request)
-	id, _ := primitive.ObjectIDFromHex(params["id"])
-	collection := client.Database("benfica").Collection("books")
-	ctx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+func deleteBook(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("Content-Type", "application/json")
+	var params = mux.Vars(request)
+	id, err := primitive.ObjectIDFromHex(params["id"])
+	collection := helper.ConnectDB()
 	filter := bson.M{"_id": id}
-	deleteResult, err := collection.DeleteOne(ctx, filter)
+	deleteResult, err := collection.DeleteOne(context.TODO(), filter)
 	if err != nil {
-		response.WriteHeader(http.StatusInternalServerError)
-		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
+		helper.GetError(err, response)
 		return
 	}
 	json.NewEncoder(response).Encode(deleteResult)
