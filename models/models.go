@@ -1,9 +1,17 @@
 package models
 
-import "go.mongodb.org/mongo-driver/bson/primitive"
+import (
+	"gopkg.in/mgo.v2/bson"
+)
 
 type Book struct {
-	ID     primitive.ObjectID `json:"_id, omitempty" bson:"_id,omitempty"`
+	ID     bson.ObjectId `json:"_id, omitempty" bson:"_id,omitempty"`
 	Name   string             `json:"name,omitempty" bson:"name,omitempty"`
 	Author string             `json:"author,omitempty" bson:"author,omitempty"`
+}
+
+type Config struct {
+	MongoDBhost 	string 		`json:"MongoDBhost"`
+	MongoDBname 	string 		`json:"MongoDBname"`
+	MongoDBCollectionName 	string 		`json:"MongoDBCollectionName"`
 }
